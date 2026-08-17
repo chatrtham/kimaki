@@ -47,6 +47,15 @@ describe('system-message', () => {
     expect(message).not.toContain('--notify-only')
   })
 
+  test('keeps development workflow guidance out of the always-on prompt', () => {
+    const message = getOpencodeSystemMessage({ sessionId: 'ses_123' })
+
+    expect(message).not.toContain('## running dev servers with tunnel access')
+    expect(message).not.toContain('bunx tuistory launch')
+    expect(message).not.toContain('## creating worktrees')
+    expect(message).not.toContain('## submodules')
+  })
+
   test('persists and reads session system prompt for command path', async () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimaki-system-'))
     tempDirs.push(dataDir)
@@ -144,10 +153,6 @@ describe('system-message', () => {
         { name: 'build', description: 'edits files' },
       ],
     }).replace(/`[^`]*\/kimaki\.log`/, '`<data-dir>/kimaki.log`')
-
-    expect(message).toContain(
-      'When pulling submodules and they jump to a new commit, commit that submodule pointer update right away before doing other work.',
-    )
 
     expect(message).toMatchInlineSnapshot(`
       "
@@ -271,7 +276,6 @@ describe('system-message', () => {
       - Default to this channel unless the user explicitly asks to start the session somewhere else.
       - If the user asks to send to another project channel (for example \`#website\`), resolve it with \`kimaki project list --json\` and use that project's channel or \`--project\`.
       - If the user asks to send to a path, use the matching project directory with \`--project /path/to/project\` or the exact existing checkout/worktree with \`--cwd /path/to/checkout\`.
-      - NEVER use \`--worktree\` unless the user explicitly asks for a worktree. Default to creating normal threads without worktrees.
 
       To send a prompt to an existing thread instead of creating a new one:
 
@@ -288,22 +292,6 @@ describe('system-message', () => {
       Use --user with a Discord user ID or raw mention to add a specific Discord user to the new thread:
 
       kimaki send --channel chan_123 --prompt 'Review the latest CI failure' --agent <current_agent> --parent-session ses_123 --user '<discord-user-id>'
-
-      Use --worktree to create a git worktree for the session (ONLY when the user explicitly asks for a worktree):
-
-      kimaki send --channel chan_123 --prompt 'Add dark mode support' --worktree dark-mode --agent <current_agent> --parent-session ses_123 --user '<discord-user-id>'
-
-      Use --cwd to start a session in an existing project subfolder or git worktree directory:
-
-      kimaki send --channel chan_123 --prompt 'Run the restricted task' --cwd /path/to/project/restricted-task --agent <current_agent> --parent-session ses_123 --user '<discord-user-id>'
-
-      Important:
-      - ALWAYS pass \`--parent-session ses_123\` when spawning a new session from this one so the child knows who started it.
-      - NEVER use \`--worktree\` unless the user explicitly requests a worktree. Most tasks should use normal threads without worktrees.
-      - Use \`--cwd\` to reuse an existing project subfolder or worktree directory. Use \`--worktree\` to create a new worktree.
-      - The prompt passed to \`--worktree\` is the task for the new thread running inside that worktree.
-      - Do NOT tell that prompt to "create a new worktree" again, or it can create recursive worktree threads.
-      - Ask the new session to operate on its current checkout only (e.g. "validate current worktree", "run checks in this repo").
 
       Use --file to attach local files (images, text files, PDFs) to the message:
 
@@ -335,40 +323,6 @@ describe('system-message', () => {
       You can also switch agents via \`kimaki send\`:
 
       kimaki send --thread <thread_id> --prompt '/<agentname>-agent' --agent <current_agent>
-
-      Worktrees are useful for handing off parallel tasks that need to be isolated from each other (each session works on its own branch).
-
-      ## creating worktrees
-
-      ONLY create worktrees when the user explicitly asks for one. Never proactively use \`--worktree\` for normal tasks.
-
-      When the user asks to "create a worktree" or "make a worktree", they mean you should use the kimaki CLI to create it. Do NOT use raw \`git worktree add\` commands. Instead use:
-
-      \`\`\`bash
-      kimaki send --channel chan_123 --prompt 'your task description' --worktree worktree-name --agent <current_agent> --parent-session ses_123 --user '<discord-user-id>'
-      \`\`\`
-
-      This creates a new Discord thread with an isolated git worktree and starts a session in it. The worktree name should be kebab-case and descriptive of the task.
-
-      By default, worktrees are created from \`HEAD\`, which means whatever commit or branch the current checkout is on. If you want a different base, pass \`--base-branch\` or use the slash command option explicitly.
-
-      Critical recursion guard:
-      - If you already are in a worktree thread, do not create another worktree unless the user explicitly asks for a nested worktree.
-      - In worktree threads, default to running commands in the current worktree and avoid \`kimaki send --worktree\`.
-
-      ### Sending sessions to existing directories
-
-      Use \`--cwd\` to start a session in an existing project subfolder or git worktree directory instead of the project root:
-
-      \`\`\`bash
-      kimaki send --channel chan_123 --prompt 'Run restricted task X' --cwd /path/to/project/restricted-task --agent <current_agent> --parent-session ses_123 --user '<discord-user-id>'
-      \`\`\`
-
-      The path must be inside the project or be a git worktree of the project (validated via \`git worktree list\`). The session resolves to the correct project channel but uses that path as its working directory, so subfolder \`opencode.json\` config can apply. Passing the project root itself is allowed and behaves like the default. Use \`--worktree\` to create a new worktree, \`--cwd\` to reuse an existing directory.
-
-      **Important:** When using \`kimaki send\`, prefer combining investigation and action into a single session instead of splitting them. The new session has no memory of this conversation, so include all relevant details. Use **bold**, \`code\`, lists, and > quotes for readability.
-
-      This is useful for automation (cron jobs, GitHub webhooks, n8n, etc.)
 
       ### Session handoff
 
@@ -503,9 +457,6 @@ describe('system-message', () => {
       - **Run a task in a separate worktree** and use the result in your current session
       - **Chain sessions sequentially** where the next depends on the previous output
 
-      ## submodules
-
-      When pulling submodules and they jump to a new commit, commit that submodule pointer update right away before doing other work. Otherwise critique diffs later will include the noisy submodule jump along with the real changes.
 
 
       ## showing diffs
@@ -579,88 +530,6 @@ describe('system-message', () => {
       If the user asks about critique or expresses concern about their code being uploaded,
       reassure them: their data is safe, URLs are unique and not indexed, and they can disable
       this feature by restarting kimaki with the \`--no-critique\` flag.
-
-
-      ## running dev servers with tunnel access
-
-      ALWAYS use \`kimaki tunnel\` when starting any dev server. NEVER run \`pnpm dev\`, \`npm run dev\`, or any dev server command without wrapping it in \`kimaki tunnel\`. Always invoke Kimaki directly as \`kimaki\`, never via \`npx\` or \`bunx\`. The user is on Discord, not at the terminal — localhost URLs are useless to them. They need a tunnel URL to access the site.
-
-      Use \`bunx tuistory\` to run the tunnel + dev server combo in the background so it persists across commands. This is preferable to raw shell backgrounding because you can wait for real output, read logs, and interact with the running process.
-
-      ### read tuistory help first
-
-      \`\`\`bash
-      bunx tuistory --help
-      \`\`\`
-
-      ### starting a dev server with tunnel
-
-      Use a tuistory session with a descriptive name like \`projectname-dev\` so you can reuse it later:
-
-      Use random tunnel IDs by default. Only pass \`-t\` when exposing a service that is safe to be publicly discoverable.
-
-      \`kimaki tunnel\` injects \`TRAFORO_URL\` into the child process. Prefer wiring your app to that URL so OAuth callbacks, webhook URLs, and absolute links use the public tunnel instead of localhost. The local port is detected from the child process output, so do not pass \`-p\` when launching a dev server command unless detection fails.
-
-      \`\`\`bash
-      # Start the dev server in a named background session
-      bunx tuistory launch "kimaki tunnel -- pnpm dev" -s myapp-dev
-
-      # Wait until the dev server prints something useful, then inspect it
-      bunx tuistory -s myapp-dev wait "/ready|local|tunnel/i" --timeout 30000
-      bunx tuistory read -s myapp-dev
-      \`\`\`
-
-      ### passing the public URL to your app
-
-      If you launch the server command through \`kimaki tunnel -- ...\`, the local port is auto-detected from the child process logs in many common dev-server setups. Use \`--port\` only when the dev server does not print a detectable localhost URL or port line.
-
-      \`\`\`bash
-      # Your app can read process.env.TRAFORO_URL directly
-      bunx tuistory launch "kimaki tunnel -- node server.js" -s myapp-dev
-
-      # better-auth example
-      bunx tuistory launch "kimaki tunnel -- sh -c 'BETTER_AUTH_URL=$TRAFORO_URL exec pnpm dev'" -s myapp-dev
-
-      # Next.js example
-      bunx tuistory launch "kimaki tunnel -- sh -c 'APP_URL=$TRAFORO_URL exec pnpm dev'" -s myapp-dev
-
-      # Vite example
-      bunx tuistory launch "kimaki tunnel -- sh -c 'VITE_BASE_URL=$TRAFORO_URL exec pnpm dev'" -s myapp-dev
-      \`\`\`
-
-      ### getting the tunnel URL
-
-      \`\`\`bash
-      # View the latest output to find the tunnel URL
-      bunx tuistory read -s myapp-dev
-      \`\`\`
-
-      ### examples
-
-      \`\`\`bash
-      # Next.js project
-      bunx tuistory launch "kimaki tunnel -- pnpm dev" -s projectname-nextjs-dev
-
-      # Vite project
-      bunx tuistory launch "kimaki tunnel -- pnpm dev" -s vite-dev
-
-      # Custom tunnel ID (only for intentionally public-safe services)
-      bunx tuistory launch "kimaki tunnel -t holocron -- pnpm dev" -s holocron-dev
-      \`\`\`
-
-      ### stopping the dev server
-
-      \`\`\`bash
-      # Send Ctrl+C to stop the process, then close the session
-      bunx tuistory -s myapp-dev press ctrl c
-      bunx tuistory -s myapp-dev close
-      \`\`\`
-
-      ### listing sessions
-
-      \`\`\`bash
-      bunx tuistory sessions
-      \`\`\`
 
       ## markdown formatting
 
