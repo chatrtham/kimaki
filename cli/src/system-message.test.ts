@@ -39,6 +39,14 @@ describe('system-message', () => {
     expect(message).toContain('<callout accent="#f59e0b">')
   })
 
+  test('keeps task scheduling guidance out of the always-on prompt', () => {
+    const message = getOpencodeSystemMessage({ sessionId: 'ses_123' })
+
+    expect(message).not.toContain('## scheduled sends and task management')
+    expect(message).not.toContain('--send-at')
+    expect(message).not.toContain('--notify-only')
+  })
+
   test('persists and reads session system prompt for command path', async () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimaki-system-'))
     tempDirs.push(dataDir)
@@ -256,8 +264,8 @@ describe('system-message', () => {
 
       You can use this to "spawn" parallel helper sessions like teammates: start new threads with focused prompts, then come back and collect the results.
       ALWAYS pass \`--parent-session ses_123\` (your current session ID) when starting a new session from this one. The child system message will include the parent session ID so it can message back only if the user asks.
-      Prefer passing the current agent with \`--agent <current_agent>\` so spawned or scheduled sessions keep the same agent unless you are intentionally switching. Replace \`<current_agent>\` with the value from the per-turn \`Current agent\` reminder.
-      When writing \`kimaki send\` shell commands, use single quotes around \`--prompt\`, \`--user\`, \`--send-at\`, and other literal arguments so backticks inside prompts are not interpreted by the shell. Prefer \`--user '<discord-user-id>'\` over \`--user 'name'\` because name lookup depends on optional Server Members Intent.
+      Prefer passing the current agent with \`--agent <current_agent>\` so spawned child sessions keep the same agent unless you are intentionally switching. Replace \`<current_agent>\` with the value from the per-turn \`Current agent\` reminder.
+      When writing \`kimaki send\` shell commands, use single quotes around literal arguments so backticks inside prompts are not interpreted by the shell. Prefer \`--user '<discord-user-id>'\` over \`--user 'name'\` because name lookup depends on optional Server Members Intent.
 
       Before sending, choose the right destination:
       - Default to this channel unless the user explicitly asks to start the session somewhere else.
@@ -276,10 +284,6 @@ describe('system-message', () => {
       kimaki send --session <session_id> --prompt 'follow-up prompt' --agent <current_agent>
 
       Use this when you only have the OpenCode session ID and the session was created on this machine.
-
-      Use --notify-only to create a notification thread without starting an AI session:
-
-      kimaki send --channel chan_123 --prompt 'User cancelled subscription' --notify-only --agent <current_agent> --user '<discord-user-id>'
 
       Use --user with a Discord user ID or raw mention to add a specific Discord user to the new thread:
 
@@ -332,79 +336,6 @@ describe('system-message', () => {
 
       kimaki send --thread <thread_id> --prompt '/<agentname>-agent' --agent <current_agent>
 
-      ## scheduled sends and task management
-
-      Use \`--send-at\` to schedule a one-time or recurring task:
-
-      kimaki send --channel chan_123 --prompt 'Reminder: review open PRs' --send-at '2026-03-01T09:00:00Z' --agent <current_agent> --parent-session ses_123 --user '<discord-user-id>'
-      kimaki send --channel chan_123 --prompt 'Run weekly test suite and summarize failures' --send-at '0 9 * * 1' --agent <current_agent> --parent-session ses_123 --user '<discord-user-id>'
-
-      **ALWAYS pass \`--user\` when scheduling a task.** Discord only shows a thread in the left sidebar to its members. Without \`--user\`, kimaki does not ensure anyone is a member, so the task can fire completely unnoticed if the user never joined the thread or already left it. This applies to \`--channel\` and \`--thread\` scheduling alike.
-
-      ALL scheduling is in UTC. Dates must be UTC ISO format ending with \`Z\`. Cron expressions also fire in UTC (e.g. \`0 9 * * 1\` means 9:00 UTC every Monday).
-      When the user specifies a time without a timezone, ask them to confirm their timezone or the UTC equivalent. Never guess the user's timezone.
-
-      \`--send-at\` supports the same useful options for new threads:
-      - \`--notify-only\` to create a reminder thread without auto-starting a session
-      - \`--worktree\` to create the scheduled thread as a worktree session (only if the user explicitly asks for a worktree)
-      - \`--agent\` and \`--model\` to control scheduled session behavior
-      - \`--parent-session\` to pass this session as parent of the scheduled child
-      - \`--user\` to add a specific user to the scheduled thread (always pass this)
-
-      \`--wait\` is incompatible with \`--send-at\` because scheduled tasks run in the future.
-
-      Keep scheduled task prompts **short**. The prompt text becomes the first message in the Discord thread, so long prompts clutter the channel. Instead of inlining the full task description in \`--prompt\`, write a markdown file in the project's \`tasks/\` folder and reference it:
-
-      \`\`\`bash
-      kimaki send --channel chan_123 --prompt 'Read tasks/weekly-test-suite.md and follow instructions' --send-at '0 9 * * 1' --agent <current_agent> --parent-session ses_123 --user '<discord-user-id>'
-      \`\`\`
-
-      The task file should contain all the detail: goal, constraints, expected output, completion criteria. Use this frontmatter format:
-
-      \`\`\`yaml
-      ---
-      title: Weekly test suite
-      description: >
-        Managed by kimaki scheduled task. Do not move or delete this file
-        without also updating the kimaki task (kimaki task list / kimaki task edit).
-      ---
-      \`\`\`
-
-      For simple reminders and notifications (\`--notify-only\`), inline the prompt directly since there is no AI session to read files.
-
-      Notification strategy:
-      - NEVER use \`@username\` (e.g. \`@Tommy\`) directly in task prompts. The prompt text becomes the first message in the thread, so a raw \`@\` mention triggers an actual Discord ping every time the task fires. Instead, wrap it in inline code like \`\\\`@Tommy\\\`\`, or use Discord user ID mentions like \`<@USER_ID>\` only in the body of the prompt where the agent will process it, not in the opening line.
-      - If a task needs user attention, add "mention the user via Discord user ID when task requires user review" in the task md file.
-      - With \`--user\`, the user is added to the thread and receives thread-level notifications.
-      - If a scheduled task completes with no actionable result, archive the session: \`kimaki session archive thread_123 (or --session ses_123)\`
-
-      Manage scheduled tasks with:
-
-      kimaki task list
-      kimaki task edit <id> --prompt "new prompt" [--send-at "new schedule"] [--user "<discord-user-id>"] [--model "provider/model"] [--agent "<agent>"]
-      kimaki task delete <id>
-
-      \`kimaki task list\` prints \`userId\`, \`agent\`, and \`model\` columns. A \`-\` in \`userId\` means nobody is added to the thread when that task fires, so the user may never see it. Fix it with \`kimaki task edit <id> --user '<discord-user-id>'\` instead of deleting and recreating the task. Change model or agent in place with \`--model\` / \`--agent\` (empty string clears the override). Do not read SQLite or recreate the task just to swap model.
-
-      \`kimaki session list\` also shows if a session was started by a scheduled \`delay\` or \`cron\` task, including task ID when available.
-
-      **Never duplicate tasks to run more frequently.** If a task should run twice a day (morning and evening), edit the existing task's cron expression instead of creating a second task. Cron supports comma-separated hours:
-
-      \`\`\`bash
-      # runs at 9:00 UTC and 18:00 UTC every day
-      kimaki task edit <id> --send-at '0 9,18 * * *'
-      \`\`\`
-
-      Use case patterns:
-      - Reminder flows: create deadline reminders with one-time \`--send-at\` and \`--notify-only\`; mention only if action is required.
-      - Proactive reminders: when you encounter time-sensitive information (API key expiration, certificate renewal, trial ending), schedule a \`--notify-only\` reminder before the deadline. Always tell the user you scheduled the reminder so they know.
-      - Weekly QA / recurring maintenance: write the full task spec in \`tasks/\` and schedule a short prompt pointing to it.
-      - Thread reminders: when the user says "remind me about this in 2 hours", use \`--send-at\` with \`--thread\` to resurface the current thread. \`--notify-only\` is NOT supported with \`--thread\`; the scheduled message always starts a session in that thread.
-
-      kimaki send --thread thread_123 (or --session ses_123) --prompt 'Reminder: you asked to be reminded about this thread.' --send-at '<future_UTC_time>' --agent <current_agent> --user '<discord-user-id>'
-
-      Replace \`<future_UTC_time>\` with the computed UTC ISO timestamp. \`--user\` re-adds the user to the thread when the reminder fires, which is what pops it back into their sidebar.
-
       Worktrees are useful for handing off parallel tasks that need to be isolated from each other (each session works on its own branch).
 
       ## creating worktrees
@@ -447,7 +378,7 @@ describe('system-message', () => {
       kimaki send --channel chan_123 --prompt 'Continuing from previous session: <summary of current task and state>' --agent <current_agent> --parent-session ses_123 --user '<discord-user-id>'
       \`\`\`
 
-      The command automatically handles long prompts (over 2000 chars) by sending them as file attachments. With \`--notify-only\`, long prompts are split into multiple messages instead so the content is directly visible.
+      The command automatically handles long prompts (over 2000 chars) by sending them as file attachments.
 
       Use this for handoff when:
       - User asks to "handoff", "continue in new thread", or "start fresh session"
