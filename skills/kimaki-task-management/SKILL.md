@@ -1,38 +1,46 @@
 ---
 name: kimaki-task-management
 repo: chatrtham/kimaki
-description: >
-  Manage Kimaki Discord tasks and reminders. Use when the user asks to schedule
-  work, run something later, repeat a prompt, list or inspect scheduled tasks,
-  edit a schedule, or cancel a task. Do not use for systemd timers, external
-  schedulers, or Telegram schedulers.
+description: Manage Kimaki scheduled OpenCode tasks from Discord or standalone OpenCode. Use when the user asks to schedule work, run something later, repeat a prompt, list, edit, inspect, or cancel a Kimaki task.
 ---
 
 # Kimaki Task Management
 
-Use Kimaki's CLI as the source of truth for Discord task scheduling. Do not
-inspect or edit the SQLite database directly.
+Use Kimaki's CLI as the source of truth for scheduled OpenCode tasks. Do not
+inspect or edit its SQLite database directly.
 
-## Context
+## Destination
 
-In a Discord session, use the dynamic context already attached to the current
-session instead of guessing identifiers:
+Choose the destination from the context that is actually available:
 
-- Current Discord channel ID is in the Kimaki session context.
-- Current thread ID and OpenCode session ID are in the Kimaki session context.
-- The current user's ID is in the per-turn `<discord-user ... user-id="..." />`
-  metadata.
-- The current agent is in the per-turn `Current agent` reminder.
+- In a Kimaki Discord session, use the current channel, thread, session, user,
+  and agent IDs from the session metadata.
+- In standalone OpenCode, use the current absolute project path from `pwd` and
+  resolve it with `kimaki project list --json`. Use `--project <path>` for a
+  project-level task.
+- Use `--channel`, `--thread`, or `--session` only when the user supplied or
+  the CLI resolved that identifier. Never invent IDs.
 
-When the user says "here" or names the current project, schedule in the current
-channel. Resolve another project with `kimaki project list --json` before using
-its channel. If the required destination or user ID is unavailable, ask rather
-than inventing it.
+Kimaki tasks run as headless sessions through the Kimaki service. Channel-level
+tasks report results in Discord. A standalone OpenCode session can create and
+manage the task, but cannot make the task resume that unrelated session unless
+it supplies a mapped `--thread` or `--session`.
 
 ## Create
 
-Run `kimaki task list` first to check for an existing task that would duplicate
-the request. Then use `kimaki send --send-at` with the resolved context:
+Run `kimaki task list` first to check for a duplicate. Use a short,
+self-contained prompt and an explicit UTC ISO timestamp ending in `Z` or a UTC
+cron expression.
+
+From a standalone OpenCode session:
+
+```bash
+kimaki send --project /absolute/path/to/project \
+  --prompt 'Short self-contained task prompt' \
+  --send-at '<UTC ISO timestamp or UTC cron>'
+```
+
+From a Kimaki Discord session, add the available context:
 
 ```bash
 kimaki send --channel <channel-id> \
@@ -43,49 +51,31 @@ kimaki send --channel <channel-id> \
   --user '<current-user-id>'
 ```
 
-Use `--send-at` with a UTC ISO timestamp ending in `Z` for a one-time task or a
-cron expression for a recurring task. Never guess a timezone. If the user
-gives a local time without a timezone, ask for the timezone or its UTC
-equivalent.
+Only pass `--parent-session`, `--agent`, or `--user` when their values are
+known. In standalone OpenCode, do not guess them. If `KIMAKI_TASK_USER_ID` is
+configured and the user wants Discord thread notifications, pass that ID as
+`--user`; otherwise warn that a task without a user may not appear in the
+user's Discord sidebar.
 
-Always pass `--user` for Discord schedules so the user is added to the task
-thread and can see future runs. Keep the opening prompt short; put substantial
-instructions in a project task file and have the scheduled prompt refer to it.
-Use `--notify-only` for a reminder that should not start an OpenCode session.
+Use `--model provider/model` when the user explicitly chooses a model. Use
+`--notify-only` for a Discord reminder that should not start an AI session. Do
+not combine `--notify-only` with `--thread`.
 
-Do not use `--notify-only` with `--thread`. A scheduled prompt in an existing
-thread starts or resumes the AI session in that thread.
-
-## Session behavior
-
-- A channel-level one-time task creates a new Discord thread and persistent
-  OpenCode session.
-- Each occurrence of a recurring channel task creates a fresh thread and
-  persistent session.
-- A task scheduled with `--thread` targets the existing thread and its mapped
-  session, so replies in that thread can continue the same conversation.
-- The OpenCode process is headless between turns, but session history and the
-  Discord thread remain resumable after the process restarts.
-- `--notify-only` creates a Discord notification without an AI session.
-
-Scheduled prompts run unattended. Warn the user if the task needs a permission
-approval or interactive answer that will not be available at run time.
+Never guess a timezone. Ask for the timezone or UTC equivalent when a local
+time is ambiguous. Scheduled prompts cannot answer permission or interactive
+questions, so warn about those requirements before creating the task.
 
 ## Manage
 
-Use the CLI rather than guessing whether a mutation succeeded:
-
 ```bash
 kimaki task list
+kimaki task list --all
 kimaki task edit <task-id> --prompt 'new prompt' --send-at '<new UTC schedule>'
-kimaki task edit <task-id> --user '<discord-user-id>'
+kimaki task edit <task-id> --model 'provider/model'
 kimaki task delete <task-id>
 ```
 
-After creating or editing a task, report the task ID, schedule, next run time,
-destination, and whether it is one-time or recurring. Before deleting, resolve
-the target with `kimaki task list`; ask if more than one task matches.
-
-If command syntax is unclear, run `kimaki send --help` or `kimaki task --help`
-and use the live output. Never claim a task was created without a successful
-CLI result containing its task ID.
+Before deleting or editing, list tasks and resolve the intended task. Ask if
+multiple tasks match. After a successful mutation, report the task ID, status,
+schedule, next run time, destination, and whether it is one-time or recurring.
+Never claim success without the CLI result.
