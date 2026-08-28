@@ -43,6 +43,8 @@ import path from 'node:path'
 import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
 
+import { buildBundledSkillsConfig } from './bundled-skills-config.js'
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 import {
   createOpencodeClient,
@@ -830,9 +832,10 @@ async function startSingleServer({
         },
       },
     },
-    skills: {
-      paths: [path.resolve(__dirname, '..', 'skills')],
-    },
+    ...buildBundledSkillsConfig({
+      disabled: process.env.KIMAKI_DISABLE_BUNDLED_SKILLS === '1',
+      skillsDirectory: path.resolve(__dirname, '..', 'skills'),
+    }),
   } satisfies Config
   const opencodeConfigPath = path.join(getDataDir(), 'opencode-config.json')
   const opencodeConfigJson = JSON.stringify(opencodeConfig, null, 2)
