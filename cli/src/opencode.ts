@@ -796,7 +796,7 @@ async function startSingleServer({
             '*.env.example': 'allow',
           },
           webfetch: 'allow',
-          websearch: 'allow',
+          'web-search': 'allow',
           codesearch: 'allow',
           // No external_directory here on purpose. opencode composes agents as
           // merge(defaults, agentSpecific, userConfig) and then appends
